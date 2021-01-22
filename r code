@@ -1,0 +1,156 @@
+library(knitr)
+library(readr)
+library(MatchIt)
+library(ggplot2)
+library("ggpubr")
+library(tibble)
+library(tidyr)
+library(dplyr)
+library(hrbrthemes)
+library(purrr)
+library (moments)
+
+#bring in data
+clicked_link <-read_csv("clicked_link.csv")
+clicked_link$Type <- as.factor('link click')
+View(clicked_link)
+names(clicked_link)
+#djust people who have x quesiton values bc that is the q before link click is possible, to be able to compare clicked and not clicked
+
+not_clicked_link <-read_csv("not_clicked_link.csv")
+not_clicked_link$Type <- as.factor('Not link click')
+View(not_clicked_link)
+names(not_clicked_link)
+#just people who have replacement cost values bc that is the q before flood, to be able to compare best clicked and not clicked
+
+$start wrangling data
+matched <- rbind(not_clicked_link, clicked_link)
+View(matched)
+class(matched)
+matched$Group <- as.logical(matched$Type == 'link click')
+str(matched)
+names(matched)
+
+matched <-matched %>%
+  mutate_if(is.numeric, ~replace_na(., 0))%>%
+  mutate_if(is.character, ~replace_na(., 0))%>%
+  mutate_if(is.list, ~replace_na(., 0))%>%
+  mutate_if(is.logical, ~replace_na(., 0))
+
+matched <-
+  matched %>%
+  mutate(site_applicant_num = case_when(matched$IS_SITE_APPLICANT <= 'No' ~ 0, matched$IS_SITE_APPLICANT <= 'Yes' ~ 1)) %>%
+  mutate(site_customer_num = case_when(matched$IS_SITE_CUSTOMER <= 'No' ~ 0, matched$IS_SITE_CUSTOMER <= 'Yes' ~ 1))
+
+#visualize and summarize
+matched %>% 
+  #Step 2
+  group_by(Group) %>% 
+  #Step 3
+  summarise(mean_TOTAL_RPA = mean(TOTAL_RPA)) %>% 
+  #Step 4
+  ggplot(aes(x = Group, y = mean_TOTAL_RPA, fill = Group)) +
+  geom_bar(stat = "identity") +
+  theme_classic() +
+  labs(
+    x = "Group",
+    y = "Average total rpa",
+    title = paste(
+      "total rpa by type"
+    )
+  )
+
+summarized_rpa = matched %>% 
+  group_by(Type) %>% 
+  summarise(mean_Total_RPA = mean(TOTAL_RPA, na.rm=TRUE))
+summarized_rpa
+
+#check for stat sig in general pop vs link click, this is how we would analyze impact of a link click without the statistical matching approach, which would be incorrect
+linkrpa_matched <- wilcox.test(TOTAL_RPA ~ Type, data = matched,
+                        exact = FALSE)
+link_rpa_matched
+#stat sig difference
+
+#statistical matching
+set.seed(1234)
+match.it <- matchit(Group ~ HOME_PURCHASE_STATUS +DEVICE_TYPE +USER_VISIT_TYPE +YEAR_BUILT +Q2B_DENSITY +RESIDENCE_TYPE +CONSTRUCTION_TYPE+ REPLACEMENT_AMOUNT_NUMBER +SQUARE_FOOTAGE, data = matched, method="nearest", ratio=1)
+
+df.match <- match.data(match.it)[1:ncol(matched)]
+View(df.match)
+
+#summarize and visualize new matched dataset
+summarized_rpa = df.match %>% 
+  group_by(Type) %>% 
+  summarise(mean_Total_RPA = mean(TOTAL_RPA, na.rm=TRUE))
+summarized_rpa
+
+summarized_rpu = df.match %>% 
+  group_by(Type) %>% 
+  summarise(mean_Total_RPU = mean(TOTAL_RPU, na.rm=TRUE))
+summarized_rpu
+
+summarized_replacement = df.match %>% 
+  group_by(Type) %>% 
+  summarise(mean_REPLACEMENT_AMOUNT_NUMBER = mean(REPLACEMENT_AMOUNT_NUMBER, na.rm=TRUE))
+summarized_replacement
+
+summarized_site_applicant_num = df.match %>% 
+  group_by(Type) %>% 
+  summarise(mean_site_applicant_num = mean(site_applicant_num, na.rm=TRUE))
+summarized_site_applicant_num
+
+df.match %>% 
+  group_by(Type) %>% 
+boxplot(df.match$site_applicant_num)
+
+ggplot(df.match, aes(x=Type, y=TOTAL_RPA, fill=Type)) + 
+  geom_boxplot()
+
+
+#check for stat sig, using wilcox test bc data is exponentially distirbuted
+link_rpa <- wilcox.test(TOTAL_RPA ~ Type, data = df.match,
+                         exact = FALSE)
+link_rpa
+#not stat sig
+
+link_rpu <- wilcox.test(TOTAL_RPU ~ Type, data = df.match,
+                        exact = FALSE)
+link_rpu
+#not stat sig
+
+link_bridge <- wilcox.test(UNIQUE_PURCHASE_CLICKS ~ Type, data = df.match,
+                        exact = FALSE)
+link_bridge
+#not stat sig
+
+link_revenue <- wilcox.test(TOTAL_REVENUE ~ Type, data = df.match,
+                           exact = FALSE)
+link_revenue
+#not stat sig
+
+link_app <- wilcox.test(site_applicant_num ~ Type, data = df.match,
+                            exact = FALSE)
+link_app
+#not stat sig diff, fine for binary
+
+#test for skewness
+skewness(df.match$site_applicant_num)
+
+
+#if wanting to use z test, get counts of people who became applicants
+df.match %>%filter(site_applicant_num == 1) %>% 
+  filter(Type=='link click') %>% nrow()
+
+df.match %>%filter(site_applicant_num == 1) %>% 
+  filter(Type=='Not link click') %>% nrow()
+
+df.match %>%filter(Type=='link click') %>% nrow()
+df.match %>%filter(Type=='Not link click') %>% nrow()
+
+res <- prop.test(x = c(4845, 5012), n = c(6297, 6297))
+res
+#not stat sig
+
+ggplot(df.match, aes(x = UNIQUE_BRIDGE_CLICKS)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(Type ~ .)
