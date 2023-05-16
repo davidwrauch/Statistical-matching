@@ -15,7 +15,7 @@ clicked_link <-read_csv("clicked_link.csv")
 clicked_link$Type <- as.factor('link click')
 View(clicked_link)
 names(clicked_link)
-#djust people who have x quesiton values bc that is the q before link click is possible, to be able to compare clicked and not clicked
+#just people who have x quesiton values bc that is the q before link click is possible, to be able to compare clicked and not clicked
 
 not_clicked_link <-read_csv("not_clicked_link.csv")
 not_clicked_link$Type <- as.factor('Not link click')
